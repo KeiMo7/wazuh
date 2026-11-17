@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Fixed `wazuh-maild` stopping when an alert's text contained lines that start with `** Alert`, which `wazuh-analysisd` wrote to `alerts.log` as the start of new alerts. ([#41237](https://github.com/wazuh/wazuh/pull/41237))
 - Fixed `wazuh-maild` stopping on an alert whose location starts with `>`, and cutting the alert subject and location one character short when a `>` without `-` preceded the `->` separator. ([#41265](https://github.com/wazuh/wazuh/pull/41265))
 - Fixed the typo "Succsessful" in the description of the Amazon Security Lake rule for successful Route 53 DNS requests (99080). ([#41519](https://github.com/wazuh/wazuh/pull/41519))
+- Fixed the vulnerability scanner filling the disk with the local mirror of the detections (`queue/indexer/db`) when `index-status` is `no`, as it has to be with the indexer disabled. The mirror is no longer kept in that case, an existing one is removed, and enabling the indexing again triggers a re-scan of the connected agents. The detections of an agent that is not connected at that moment are missing from the index until the next re-scan that finds it connected. ([#41543](https://github.com/wazuh/wazuh/pull/41543))
 
 #### Changed
 
