@@ -230,7 +230,7 @@ list(APPEND shared_tests_flags "-Wl,--wrap,_merror -Wl,--wrap,_mwarn -Wl,--wrap,
                                 -Wl,--wrap,fflush -Wl,--wrap,fgets -Wl,--wrap,fgetpos -Wl,--wrap,fopen -Wl,--wrap,fread \
                                 -Wl,--wrap,fseek -Wl,--wrap,fwrite -Wl,--wrap,remove -Wl,--wrap,fgetc -Wl,--wrap,popen \
                                 -Wl,--wrap,OS_SendSecureTCPCluster -Wl,--wrap,OS_RecvSecureClusterTCP \
-                                ${DEBUG_OP_WRAPPERS}")
+                                -Wl,--wrap,socket -Wl,--wrap,connect -Wl,--wrap,getsockname -Wl,--wrap,OS_GetIPv4FromIPv6 ${DEBUG_OP_WRAPPERS}")
 endif()
 
 if(NOT ${TARGET} STREQUAL "winagent")
