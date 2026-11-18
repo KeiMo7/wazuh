@@ -33,9 +33,11 @@
 
 namespace legacy
 {
-using hlp::unescape; // shared with production, untouched by the change
+// Shared with production. Its implementation changed in this branch (one pass instead of one erase per
+// escape) with the same output for every input, which UnescapeDiff in parse_field_test.cpp pins.
+using hlp::unescape;
 
-// BEGIN copy of parse_field.cpp:90-139
+// BEGIN copy of parse_field.cpp, from convertDotToSlash to the end of updateDocImpl
 
 // TODO: evaluate which is the most suitable site for this functionality
 std::string convertDotToSlash(std::string_view key)

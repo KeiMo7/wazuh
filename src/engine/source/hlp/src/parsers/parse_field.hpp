@@ -65,11 +65,16 @@ std::optional<Field>
 getField(std::string_view input, const char delimiter, const char quote, const char escape, bool strict);
 
 /**
- * @brief Unescapes a string
+ * @brief Removes the escape characters of a value, in place and in one pass.
  *
- * @param is_escaped Whether the string is escaped.
- * @param vs The string to be unescaped.
- * @param escape The escape character
+ * Every occurrence of @p escape is consumed and the byte after it is kept verbatim, scanning left to right:
+ * `a\\b` becomes `a\b` and an escape at the end of the value disappears. Every escape is consumed, not only
+ * the ones that escape a meaningful character, which is what the key-value parser detects to set
+ * @p is_escaped. An empty @p escape is a no-op.
+ *
+ * @param is_escaped Whether the value holds escapes to remove; false leaves @p vs untouched.
+ * @param vs The value, modified in place and shortened to the unescaped length.
+ * @param escape The escape sequence; every caller in the tree passes a single character.
  */
 void unescape(bool is_escaped, std::string& vs, std::string_view escape);
 
