@@ -22,6 +22,7 @@
 #define PLUGINS_OLD_DIR_AUDISP      "/etc/audisp/plugins.d"
 #define PLUGINS_DIR_AUDIT           "/etc/audit/plugins.d"
 #define AUDIT_CONF_LINK             "af_wazuh.conf"
+#define AUDISP_CONF_MODE            0640
 #define BUF_SIZE OS_MAXSTR
 
 // Global variables
@@ -100,6 +101,74 @@ int check_auditd_enabled(void) {
     return auditd_pid;
 }
 
+/**
+ * @brief Set the audisp plugin configuration to root:root and at most AUDISP_CONF_MODE, as the CIS
+ * audit benchmarks require ("640 or more restrictive").
+ *
+ * The file is written with the agent's umask and group, and OS_MoveFile() falls back to a plain copy
+ * when tmp/ and the plugins directory are on different filesystems, so the final file has to be
+ * fixed in place. Permission bits beyond AUDISP_CONF_MODE are dropped and the rest are kept, so a
+ * stricter mode such as 0600 stays. A file that already complies is not touched. The file is changed
+ * through a descriptor opened without following links, so a symbolic link's target is never touched.
+ * Who-data does not depend on any of this, so a failure is only reported.
+ *
+ * @param audisp_path Path of the audisp plugin configuration file.
+ */
+static void audisp_restrict_permissions(const char *audisp_path) {
+    struct stat st;
+    mode_t mode;
+    bool changed = false;
+    int fd;
+
+    if (fd = open(audisp_path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY | O_CLOEXEC), fd < 0) {
+        if (errno == ELOOP) {
+            mdebug1("'%s' is a symbolic link, its permissions are left as they are.", audisp_path);
+        } else if (errno != ENOENT) {
+            mwarn("Could not open '%s' to check its permissions: %s (%d). Who-data is not affected.",
+                  audisp_path, strerror(errno), errno);
+        }
+        return;
+    }
+
+    if (fstat(fd, &st) < 0) {
+        mwarn("Could not check the permissions of '%s': %s (%d). Who-data is not affected.",
+              audisp_path, strerror(errno), errno);
+        goto end;
+    }
+
+    if (!S_ISREG(st.st_mode)) {
+        goto end;
+    }
+
+    mode = st.st_mode & 07777;
+
+    if (st.st_uid != 0 || st.st_gid != 0) {
+        if (fchown(fd, 0, 0) < 0) {
+            mwarn("Could not set the owner of '%s' to root:root: %s (%d). Who-data is not affected.",
+                  audisp_path, strerror(errno), errno);
+        } else {
+            changed = true;
+        }
+    }
+
+    if (mode & ~AUDISP_CONF_MODE) {
+        if (fchmod(fd, mode & AUDISP_CONF_MODE) < 0) {
+            mwarn("Could not set the mode of '%s' to %04o: %s (%d). Who-data is not affected.",
+                  audisp_path, (unsigned)(mode & AUDISP_CONF_MODE), strerror(errno), errno);
+        } else {
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        mdebug1("Restricted the permissions of '%s', found %04o %u:%u.", audisp_path, (unsigned)mode,
+                (unsigned)st.st_uid, (unsigned)st.st_gid);
+    }
+
+end:
+    close(fd);
+}
+
 int configure_audisp(const char *audisp_path, const char *abs_path_socket, const char *audisp_config) {
     FILE *fp;
     char tmp_file_path[PATH_MAX] = {'\0'};
@@ -144,6 +213,8 @@ int configure_audisp(const char *audisp_path, const char *abs_path_socket, const
         merror("Failed to move '%s' to '%s'", tmp_file_path, audisp_path);
         return -1;
     }
+
+    audisp_restrict_permissions(audisp_path);
 
     if (syscheck.restart_audit) {
         minfo(FIM_AUDIT_RESTARTING, audisp_path);
@@ -326,6 +397,9 @@ int set_auditd_config_template(const char *plugin_dir, const char *audisp_config
         retval = configure_audisp(audisp_path, abs_path_socket, configuration);
         goto end;
     }
+
+    // Unchanged file, possibly written with looser permissions by an earlier agent
+    audisp_restrict_permissions(audisp_path);
 
     // Check that the socket exists
     if (IsSocket(AUDIT_SOCKET) == 0) {
@@ -578,6 +652,12 @@ int configure_and_connect_audit_socket(void) {
             // Auditd is already serving the socket. A configuration this agent could have written
             // is a working setup, and restarting Auditd to rewrite it would be gratuitous.
             if (audisp_configuration_is_known(plugin_dir, templates, count)) {
+                char audisp_path[PATH_MAX];
+
+                // Possibly written with looser permissions by an earlier agent
+                if (snprintf(audisp_path, sizeof(audisp_path), "%s/%s", plugin_dir, AUDIT_CONF_LINK) < (int)sizeof(audisp_path)) {
+                    audisp_restrict_permissions(audisp_path);
+                }
                 return sfd;
             }
 

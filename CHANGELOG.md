@@ -258,3 +258,4 @@
 | [#40711](https://github.com/wazuh/wazuh/issues/40711) | Fixed Windows users inventory reporting the account comment as `user.full_name` and `0` as `user.password.last_change`. The account comment is no longer reported. |
 | [#40946](https://github.com/wazuh/wazuh/issues/40946) | Fixed Logcollector losing lines when a truncated file grew past the old read position before the next check. |
 | [#41047](https://github.com/wazuh/wazuh/issues/41047) | Fixed `systemctl restart wazuh-agent` during a reload restarting only `wazuh-agentd`, and the ms-graph, office365, github, aws, azure and command modules losing every event after `wazuh-agentd` restarts. |
+| [#41621](https://github.com/wazuh/wazuh/issues/41621) | Fixed the FIM who-data audit plugin configuration file failing the CIS audit configuration permission checks. |
