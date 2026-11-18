@@ -171,6 +171,75 @@ std::string xmlRepeatedSibling(int64_t n)
     return text;
 }
 
+/** @brief kv text "k=<value>", where the value is L bytes before unescaping. */
+std::string kvDenseEscapes(int64_t bytes)
+{
+    return "k=" + std::string(static_cast<size_t>(bytes), '\\');
+}
+
+/** @brief L bytes of 'v' with two escaped escapes replacing bytes at a third and two thirds of the value. */
+std::string kvSparseEscapes(int64_t bytes)
+{
+    const auto length = static_cast<size_t>(bytes);
+    std::string value(length, 'v');
+    value[length / 3] = '\\';
+    value[length / 3 + 1] = '\\';
+    value[2 * length / 3] = '\\';
+    value[2 * length / 3 + 1] = '\\';
+    return "k=" + value;
+}
+
+std::string kvPlainValue(int64_t bytes)
+{
+    return "k=" + std::string(static_cast<size_t>(bytes), 'v');
+}
+
+/** @brief 64 children of "r" whose names are nameLength bytes long: the ancestor path grows, the writes do not. */
+std::string xmlNameLength(int64_t nameLength)
+{
+    constexpr int64_t CHILDREN = 64;
+    const auto length = static_cast<size_t>(nameLength);
+    std::string text = "<r>";
+    for (int64_t i = 0; i < CHILDREN; ++i)
+    {
+        // An XML element name cannot start with a digit, so the index goes at the end.
+        const auto index = std::to_string(i);
+        const auto fill = length > index.size() + 1 ? length - index.size() - 1 : 1;
+        const auto name = "n" + std::string(fill, 'x') + index;
+        text += "<" + name + ">v</" + name + ">";
+    }
+    text += "</r>";
+    return text;
+}
+
+/** @brief A chain of depth elements, "v" at the bottom. */
+std::string xmlDepth(int64_t depth)
+{
+    std::string open;
+    std::string close;
+    for (int64_t i = 0; i < depth; ++i)
+    {
+        const auto name = "n" + std::to_string(i);
+        open += "<" + name + ">";
+        close = "</" + name + ">" + close;
+    }
+    return open + "v" + close;
+}
+
+/** @brief A chain of depth levels, each one holding a repeated sibling before nesting further. */
+std::string xmlNestedRepeatedSibling(int64_t depth)
+{
+    std::string open;
+    std::string close;
+    for (int64_t i = 0; i < depth; ++i)
+    {
+        const auto name = "n" + std::to_string(i);
+        open += "<" + name + "><a>v</a><a>v</a>";
+        close = "</" + name + ">" + close;
+    }
+    return open + close;
+}
+
 void BM_ParseKv_Flat(benchmark::State& state)
 {
     const auto n = static_cast<size_t>(state.range(0));
@@ -223,6 +292,48 @@ void BM_ParseXml_RepeatedSibling(benchmark::State& state)
     runParser(state, parser, xmlRepeatedSibling(state.range(0)), {{TARGET + "/r/a", n}});
 }
 
+// Cost of unescaping against the number of bytes of the value. The post-conditions are the unescaped length
+// of the value, so a run that does not reach unescape (the kv parser only sets its escape flag when an escape
+// precedes the quote, the escape, the separator or the delimiter) fails instead of silently measuring nothing.
+void BM_ParseKv_Escapes(benchmark::State& state)
+{
+    const auto bytes = static_cast<size_t>(state.range(0));
+    const auto parser = hlp::parsers::getKVParser(kvParams());
+    runParser(state, parser, kvDenseEscapes(state.range(0)), {{TARGET + "/k", bytes / 2}});
+}
+
+void BM_ParseKv_SparseEscape(benchmark::State& state)
+{
+    const auto bytes = static_cast<size_t>(state.range(0));
+    const auto parser = hlp::parsers::getKVParser(kvParams());
+    runParser(state, parser, kvSparseEscapes(state.range(0)), {{TARGET + "/k", bytes - 2}});
+}
+
+void BM_ParseKv_PlainValue(benchmark::State& state)
+{
+    const auto bytes = static_cast<size_t>(state.range(0));
+    const auto parser = hlp::parsers::getKVParser(kvParams());
+    runParser(state, parser, kvPlainValue(state.range(0)), {{TARGET + "/k", bytes}});
+}
+
+void BM_ParseXml_NameLength(benchmark::State& state)
+{
+    const auto parser = hlp::parsers::getXMLParser(xmlParams());
+    runParser(state, parser, xmlNameLength(state.range(0)), {{TARGET + "/r", 64}});
+}
+
+void BM_ParseXml_Depth(benchmark::State& state)
+{
+    const auto parser = hlp::parsers::getXMLParser(xmlParams());
+    runParser(state, parser, xmlDepth(state.range(0)), {{TARGET + "/n0", 1}});
+}
+
+void BM_ParseXml_NestedRepeatedSibling(benchmark::State& state)
+{
+    const auto parser = hlp::parsers::getXMLParser(xmlParams());
+    runParser(state, parser, xmlNestedRepeatedSibling(state.range(0)), {{TARGET + "/n0/a", 2}});
+}
+
 } // namespace
 
 // =============================================================================
@@ -250,3 +361,17 @@ REGISTER_SCALING_BENCH(BM_ParseXml_WindowsData);
 // Repeated siblings are appended to their array, so the memory of this case grows with N: the peak RSS of the process
 // (about 11 MiB with small sizes) is about 18 MiB at 16 384 and about 56 MiB at 65 536 in a Release build.
 REGISTER_SCALING_BENCH(BM_ParseXml_RepeatedSibling);
+
+// Unescaping: swept by bytes of the value, not by number of members.
+#define REGISTER_VALUE_BYTES_BENCH(name)                                                                               \
+    BENCHMARK(name)->RangeMultiplier(4)->Range(1024, 1048576)->Unit(benchmark::kMicrosecond)
+
+REGISTER_VALUE_BYTES_BENCH(BM_ParseKv_Escapes);
+REGISTER_VALUE_BYTES_BENCH(BM_ParseKv_SparseEscape);
+REGISTER_VALUE_BYTES_BENCH(BM_ParseKv_PlainValue);
+
+// The two remaining costs of the xml parser: the ancestor path, which every write parses again, and the
+// subtree that a repeated sibling copies when its parent turns into an array.
+BENCHMARK(BM_ParseXml_NameLength)->RangeMultiplier(4)->Range(4, 4096)->Unit(benchmark::kMicrosecond);
+BENCHMARK(BM_ParseXml_Depth)->RangeMultiplier(2)->Range(2, 128)->Unit(benchmark::kMicrosecond);
+BENCHMARK(BM_ParseXml_NestedRepeatedSibling)->RangeMultiplier(2)->Range(2, 128)->Unit(benchmark::kMicrosecond);
